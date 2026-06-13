@@ -140,7 +140,7 @@ const cohortMetrics = [
   { label: 'Fitzpatrick V-VI', accuracy: 84, reviewRate: 19 },
 ]
 
-export function analyzeSkinImage(imageNameOrUrl) {
+function analyzeSkinImage(imageNameOrUrl) {
   const seed = String(imageNameOrUrl || 'skintrack-demo-image').toLowerCase()
   const hash = Array.from(seed).reduce(
     (total, character, index) =>
