@@ -463,44 +463,132 @@ button {
   width: 1px;
 }
 
-.selected-image-card {
-  align-items: center;
+.image-analysis-card {
   background: linear-gradient(135deg, #f8fafc, #ecfeff);
   border: 1px solid #dbeafe;
   border-radius: 22px;
   display: grid;
   gap: 16px;
-  grid-template-columns: 112px minmax(0, 1fr);
   padding: 14px;
 }
 
-.selected-image-card img,
-.clinician-image-review img,
+.analysis-image-frame img,
+.clinician-image-frame img,
 .patient-thumbnail {
   background: #e2e8f0;
   object-fit: cover;
 }
 
-.selected-image-card img {
-  border-radius: 18px;
-  height: 118px;
-  width: 112px;
+.analysis-image-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
 }
 
-.selected-image-card strong,
-.selected-image-card p,
+.overlay-toggle {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #bae6fd;
+  border-radius: 999px;
+  color: #0f766e;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 900;
+  gap: 6px;
+  padding: 8px 11px;
+}
+
+.overlay-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.analysis-image-frame {
+  aspect-ratio: 4 / 3;
+  background: #e2e8f0;
+  border-radius: 20px;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.analysis-image-frame img {
+  height: 100%;
+  width: 100%;
+}
+
+.marker-overlay {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+
+.acne-marker {
+  align-items: flex-start;
+  background: rgba(244, 63, 94, 0.24);
+  border: 2px solid rgba(225, 29, 72, 0.88);
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 4px rgba(244, 63, 94, 0.14),
+    0 10px 24px rgba(136, 19, 55, 0.25);
+  display: flex;
+  justify-content: center;
+  min-height: 28px;
+  min-width: 28px;
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+
+.acne-marker.redness {
+  background: rgba(251, 113, 133, 0.24);
+  border-color: rgba(244, 63, 94, 0.85);
+}
+
+.acne-marker.inflamed {
+  background: rgba(239, 68, 68, 0.24);
+  border-color: rgba(185, 28, 28, 0.9);
+}
+
+.acne-marker.comedone {
+  background: rgba(236, 72, 153, 0.22);
+  border-color: rgba(190, 24, 93, 0.85);
+  border-radius: 12px;
+}
+
+.acne-marker span {
+  background: rgba(15, 23, 42, 0.88);
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 5px 7px;
+  position: absolute;
+  top: -16px;
+  white-space: nowrap;
+}
+
+.marker-overlay.compact .acne-marker span {
+  display: none;
+}
+
+.analysis-image-meta strong,
+.analysis-image-meta p,
 .analysis-control strong,
 .analysis-control span {
   display: block;
 }
 
-.selected-image-card strong {
+.analysis-image-meta strong {
   color: #0f172a;
   margin: 10px 0 6px;
   overflow-wrap: anywhere;
 }
 
-.selected-image-card p {
+.analysis-image-meta p {
   color: #9a3412;
   font-size: 12px;
   font-weight: 800;
@@ -633,6 +721,13 @@ button {
   overflow-wrap: anywhere;
 }
 
+.analysis-badges {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .severity-badge {
   border-radius: 999px;
   font-size: 13px;
@@ -659,7 +754,7 @@ button {
 .analysis-score-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .analysis-score-card {
@@ -1047,10 +1142,18 @@ button {
   padding: 14px;
 }
 
-.clinician-image-review img {
+.clinician-image-frame {
   border-radius: 20px;
   height: 142px;
+  overflow: hidden;
+  position: relative;
   width: 152px;
+}
+
+.clinician-image-frame img {
+  border-radius: 20px;
+  height: 100%;
+  width: 100%;
 }
 
 .clinician-image-review strong {
@@ -1275,7 +1378,7 @@ button {
   .patient-row,
   .cohort-row,
   .image-workflow,
-  .selected-image-card,
+  .image-analysis-card,
   .clinician-image-review,
   .analysis-score-grid,
   .indicator-grid {
@@ -1299,8 +1402,7 @@ button {
     flex-direction: column;
   }
 
-  .selected-image-card img,
-  .clinician-image-review img {
+  .clinician-image-frame {
     height: 220px;
     width: 100%;
   }

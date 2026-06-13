@@ -10,6 +10,8 @@ import {
   ClipboardCheck,
   Clock,
   Edit3,
+  Eye,
+  EyeOff,
   HeartPulse,
   LineChart,
   Lock,
@@ -150,25 +152,33 @@ function analyzeSkinImage(imageNameOrUrl) {
   const severityScore = hash % 101
   const severityLevel =
     severityScore >= 67 ? 'severe' : severityScore >= 34 ? 'moderate' : 'mild'
-  const confidenceScore = 72 + (hash % 25)
-  const detectedVisualIndicators = [
-    {
-      label: 'redness',
-      detected: severityScore > 22 || hash % 2 === 0,
-    },
-    {
-      label: 'inflamed lesions',
-      detected: severityScore > 48 || hash % 5 === 0,
-    },
-    {
-      label: 'comedones',
-      detected: severityScore > 30 || hash % 3 === 0,
-    },
-    {
-      label: 'scarring risk',
-      detected: severityScore > 70 || hash % 11 === 0,
-    },
-  ]
+  const confidence = 72 + (hash % 25)
+  const lesionCount =
+    severityLevel === 'severe'
+      ? 6 + (hash % 4)
+      : severityLevel === 'moderate'
+        ? 4 + (hash % 3)
+        : 2 + (hash % 3)
+  const markerTypes = ['lesion', 'redness', 'inflamed', 'comedone']
+  const markers = Array.from({ length: lesionCount }, (_, index) => {
+    const markerSeed = hash + index * 137
+    const type = markerTypes[(markerSeed + index) % markerTypes.length]
+
+    return {
+      confidence: 68 + (markerSeed % 29),
+      label: type === 'lesion' ? `lesion ${index + 1}` : type,
+      size: 9 + (markerSeed % 13),
+      type,
+      x: 22 + (markerSeed % 57),
+      y: 18 + ((markerSeed * 7) % 62),
+    }
+  })
+  const detectedIndicators = [
+    severityScore > 22 || hash % 2 === 0 ? 'redness' : null,
+    severityScore > 48 || hash % 5 === 0 ? 'inflamed lesions' : null,
+    severityScore > 30 || hash % 3 === 0 ? 'comedones' : null,
+    severityScore > 70 || hash % 11 === 0 ? 'scarring risk' : null,
+  ].filter(Boolean)
   const suggestedNextStep =
     severityLevel === 'severe'
       ? 'Prioritize dermatologist review, compare against prior photos, and discuss escalation options if clinically appropriate.'
@@ -177,8 +187,10 @@ function analyzeSkinImage(imageNameOrUrl) {
         : 'Continue weekly tracking and send supportive adherence coaching for dermatologist approval.'
 
   return {
-    confidenceScore,
-    detectedVisualIndicators,
+    confidence,
+    detectedIndicators,
+    lesionCount,
+    markers,
     safetyDisclaimer: SAFETY_DISCLAIMER,
     severityLevel,
     severityScore,
@@ -193,6 +205,7 @@ function App() {
   const [actionStatus, setActionStatus] = useState({})
   const [selectedImage, setSelectedImage] = useState(() => demoAcneSamples[0] || null)
   const [analysisResult, setAnalysisResult] = useState(null)
+  const [showOverlay, setShowOverlay] = useState(true)
 
   useEffect(() => {
     if (selectedImage?.source !== 'upload') {
@@ -236,15 +249,16 @@ function App() {
     qol: latestWeek.qol,
     lastUpload: selectedImage ? 'Selected now' : 'Awaiting image',
     due: analysisResult
-      ? `${analysisResult.severityLevel} simulated acne analysis`
+      ? `${analysisResult.severityLevel} simulated acne analysis · ${analysisResult.lesionCount} marked regions`
       : 'Needs photo analysis',
     aiAction:
       analysisResult?.suggestedNextStep ||
       'Select or upload a face image, run the simulated AI analysis, then route results for dermatologist review.',
     flags: analysisResult
-      ? analysisResult.detectedVisualIndicators
-          .filter((indicator) => indicator.detected)
-          .map((indicator) => indicator.label)
+      ? [
+          `${analysisResult.lesionCount} simulated markers`,
+          ...analysisResult.detectedIndicators,
+        ]
       : ['Awaiting simulated analysis'],
     imageName: selectedImage?.name,
     uploadedImage: selectedImage?.src,
@@ -293,6 +307,7 @@ function App() {
     }
 
     setAnalysisResult(analyzeSkinImage(selectedImage.name || selectedImage.src))
+    setShowOverlay(true)
     setSelectedPatientId('patient-upload')
   }
 
@@ -422,16 +437,32 @@ function App() {
                 </label>
               </div>
 
-              <div className="selected-image-card">
+              <div className="image-analysis-card">
                 {selectedImage ? (
                   <>
-                    <img src={selectedImage.src} alt={`${selectedImage.name} selected`} />
-                    <div>
+                    <div className="analysis-image-toolbar">
                       <span className="status-pill">
                         {selectedImage.source === 'upload'
                           ? 'Uploaded image'
                           : 'Demo sample selected'}
                       </span>
+                      <button
+                        className="overlay-toggle"
+                        disabled={!analysisResult}
+                        onClick={() => setShowOverlay((current) => !current)}
+                        type="button"
+                      >
+                        {showOverlay ? <Eye size={16} /> : <EyeOff size={16} />}
+                        AI Overlay
+                      </button>
+                    </div>
+                    <div className="analysis-image-frame">
+                      <img src={selectedImage.src} alt={`${selectedImage.name} selected`} />
+                      {analysisResult && showOverlay && (
+                        <MarkerOverlay markers={analysisResult.markers} />
+                      )}
+                    </div>
+                    <div className="analysis-image-meta">
                       <strong>{selectedImage.name}</strong>
                       <p>{SAFETY_DISCLAIMER}</p>
                     </div>
@@ -559,7 +590,7 @@ function App() {
               <ScoreBar
                 label="Confidence"
                 tone="success"
-                value={analysisResult.confidenceScore}
+                value={analysisResult.confidence}
               />
             )}
             <div className="ai-note">
@@ -699,10 +730,15 @@ function App() {
 
             {selectedPatient.uploadedImage && (
               <div className="clinician-image-review">
-                <img
-                  src={selectedPatient.uploadedImage}
-                  alt={`${selectedPatient.name} selected face review`}
-                />
+                <div className="clinician-image-frame">
+                  <img
+                    src={selectedPatient.uploadedImage}
+                    alt={`${selectedPatient.name} selected face review`}
+                  />
+                  {selectedPatient.analysis && showOverlay && (
+                    <MarkerOverlay markers={selectedPatient.analysis.markers} compact />
+                  )}
+                </div>
                 <div>
                   <span className="status-pill alert">Dermatologist review required</span>
                   <strong>{selectedPatient.imageName}</strong>
@@ -719,7 +755,7 @@ function App() {
                 <ScoreBar
                   label="Confidence"
                   tone="success"
-                  value={selectedPatient.analysis.confidenceScore}
+                  value={selectedPatient.analysis.confidence}
                 />
               )}
             </div>
@@ -736,14 +772,9 @@ function App() {
                   Simulated level: {selectedPatient.analysis.severityLevel}
                 </strong>
                 <p>
-                  Detected visual indicators are prototype-only: {' '}
-                  {selectedPatient.analysis.detectedVisualIndicators
-                    .map(
-                      (indicator) =>
-                        `${indicator.label} ${indicator.detected ? 'observed' : 'not prominent'}`,
-                    )
-                    .join(', ')}
-                  .
+                  {selectedPatient.analysis.lesionCount} prototype marker
+                  regions were generated. Detected indicators are simulated:{' '}
+                  {selectedPatient.analysis.detectedIndicators.join(', ') || 'none'}.
                 </p>
               </div>
             )}
@@ -854,6 +885,28 @@ function App() {
   )
 }
 
+function MarkerOverlay({ compact = false, markers }) {
+  return (
+    <div className={compact ? 'marker-overlay compact' : 'marker-overlay'}>
+      {markers.map((marker, index) => (
+        <div
+          className={`acne-marker ${marker.type}`}
+          key={`${marker.type}-${index}`}
+          style={{
+            height: `${marker.size}%`,
+            left: `${marker.x}%`,
+            top: `${marker.y}%`,
+            width: `${marker.size}%`,
+          }}
+          title={`${marker.label} · simulated confidence ${marker.confidence}%`}
+        >
+          <span>{marker.label}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function AnalysisResults({ result, selectedImage }) {
   return (
     <div className="analysis-results">
@@ -863,8 +916,11 @@ function AnalysisResults({ result, selectedImage }) {
           <h3>Prototype-only acne analysis</h3>
           <span>{selectedImage?.name}</span>
         </div>
-        <div className={`severity-badge ${result.severityLevel}`}>
-          {result.severityLevel}
+        <div className="analysis-badges">
+          <span className="status-pill alert">Dermatologist review required</span>
+          <div className={`severity-badge ${result.severityLevel}`}>
+            {result.severityLevel}
+          </div>
         </div>
       </div>
 
@@ -875,21 +931,31 @@ function AnalysisResults({ result, selectedImage }) {
         </div>
         <div className="analysis-score-card">
           <span>Confidence score</span>
-          <strong>{result.confidenceScore}%</strong>
+          <strong>{result.confidence}%</strong>
+        </div>
+        <div className="analysis-score-card">
+          <span>Marked regions</span>
+          <strong>{result.lesionCount}</strong>
         </div>
       </div>
 
       <div className="indicator-grid">
-        {result.detectedVisualIndicators.map((indicator) => (
+        {['redness', 'inflamed lesions', 'comedones', 'scarring risk'].map((indicator) => (
           <div
             className={
-              indicator.detected ? 'indicator-chip detected' : 'indicator-chip'
+              result.detectedIndicators.includes(indicator)
+                ? 'indicator-chip detected'
+                : 'indicator-chip'
             }
-            key={indicator.label}
+            key={indicator}
           >
             <CheckCircle size={16} />
-            <span>{indicator.label}</span>
-            <strong>{indicator.detected ? 'observed' : 'not prominent'}</strong>
+            <span>{indicator}</span>
+            <strong>
+              {result.detectedIndicators.includes(indicator)
+                ? 'simulated'
+                : 'not prominent'}
+            </strong>
           </div>
         ))}
       </div>
