@@ -196,7 +196,7 @@ function App() {
                 Start weekly check-in <ChevronRight size={18} />
               </button>
               <button className="secondary-action" type="button">
-                View clinician queue
+                <MessageSquare size={18} /> View clinician queue
               </button>
             </div>
           </div>
