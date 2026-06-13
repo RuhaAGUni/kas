@@ -1070,13 +1070,26 @@ button {
 }
 
 .indicator-chip span {
+  display: block;
   font-weight: 900;
   text-transform: capitalize;
+}
+
+.indicator-chip p {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 3px 0 0;
+}
+
+.indicator-chip.detected p {
+  color: #0f766e;
 }
 
 .indicator-chip strong {
   color: inherit;
   font-size: 12px;
+  text-align: right;
 }
 
 .next-step-card,

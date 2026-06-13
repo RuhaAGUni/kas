@@ -11,6 +11,7 @@ SAFETY_DISCLAIMER = (
     "Dermatologist review required."
 )
 MODEL_PATH = Path(__file__).resolve().parent.parent / "model" / "extracted" / "best.pt"
+INDICATOR_CONFIDENCE_THRESHOLD = 25
 
 app = FastAPI(title="SkinTrack AI Backend", version="0.1.0")
 app.add_middleware(
@@ -70,7 +71,7 @@ async def analyze_skin_image(file: UploadFile = File(...)) -> dict[str, Any]:
         results = model.predict(source=image, verbose=False)
         result = results[0] if results else None
         markers = extract_markers(result, image.width, image.height)
-        return build_analysis_response(markers, result)
+        return build_analysis_response(markers, result, image)
     except Exception as exc:  # pragma: no cover - depends on local ML runtime.
         return unavailable_response(f"YOLO prediction failed: {exc}")
 
@@ -107,10 +108,14 @@ def extract_markers(result: Any, image_width: int, image_height: int) -> list[di
     return markers
 
 
-def build_analysis_response(markers: list[dict[str, Any]], result: Any) -> dict[str, Any]:
+def build_analysis_response(
+    markers: list[dict[str, Any]], result: Any, image: Image.Image
+) -> dict[str, Any]:
     lesion_count = len(markers)
 
     if lesion_count == 0:
+        indicator_status = empty_indicator_status("No YOLO detections returned.")
+
         return {
             "source": "real-yolo-model",
             "modelLoaded": True,
@@ -120,6 +125,7 @@ def build_analysis_response(markers: list[dict[str, Any]], result: Any) -> dict[
             "lesionCount": 0,
             "predictedLabel": "none",
             "detectedIndicators": [],
+            "indicatorStatus": indicator_status,
             "suggestedNextStep": (
                 "No model detections were returned. Continue routine tracking and "
                 "route the image for dermatologist review if symptoms are changing."
@@ -140,7 +146,8 @@ def build_analysis_response(markers: list[dict[str, Any]], result: Any) -> dict[
     )
     severity_level = get_severity_level(severity_score)
     predicted_label = get_predicted_label(markers)
-    detected_indicators = get_detected_indicators(markers, severity_score)
+    indicator_status = derive_indicator_status(markers, image)
+    detected_indicators = get_detected_indicators(markers, indicator_status)
 
     return {
         "source": "real-yolo-model",
@@ -151,7 +158,8 @@ def build_analysis_response(markers: list[dict[str, Any]], result: Any) -> dict[
         "lesionCount": lesion_count,
         "predictedLabel": predicted_label,
         "detectedIndicators": detected_indicators,
-        "suggestedNextStep": get_suggested_next_step(severity_level),
+        "indicatorStatus": indicator_status,
+        "suggestedNextStep": get_suggested_next_step(indicator_status),
         "markers": markers,
         "safetyDisclaimer": SAFETY_DISCLAIMER,
         "modelNames": getattr(result, "names", {}) if result is not None else {},
@@ -169,6 +177,7 @@ def unavailable_response(message: str) -> dict[str, Any]:
         "lesionCount": 0,
         "predictedLabel": "model unavailable",
         "detectedIndicators": [],
+        "indicatorStatus": empty_indicator_status("Model unavailable."),
         "suggestedNextStep": (
             "The YOLO model is unavailable. Use prototype fallback analysis and "
             "require dermatologist review."
@@ -196,36 +205,213 @@ def get_predicted_label(markers: list[dict[str, Any]]) -> str:
     return max(label_counts, key=label_counts.get)
 
 
-def get_detected_indicators(markers: list[dict[str, Any]], severity_score: int) -> list[str]:
-    labels = " ".join(marker["type"].lower() for marker in markers)
+def derive_indicator_status(
+    markers: list[dict[str, Any]], image: Image.Image
+) -> dict[str, dict[str, Any]]:
+    status = empty_indicator_status("No supporting YOLO evidence.")
+
+    indicator_rules = {
+        "scarringRisk": {
+            "keywords": [
+                "post",
+                "scar",
+                "scarred",
+                "pigmentation",
+                "hyperpigmentation",
+                "mark",
+            ],
+            "label": "post-acne marks",
+        },
+        "redness": {
+            "keywords": ["red", "redness", "erythema"],
+            "label": "redness",
+        },
+        "inflamedLesions": {
+            "keywords": [
+                "inflamed",
+                "inflammatory",
+                "papule",
+                "pustule",
+            ],
+            "label": "inflamed lesions",
+        },
+        "comedones": {
+            "keywords": [
+                "comedone",
+                "blackhead",
+                "whitehead",
+                "open comedo",
+                "closed comedo",
+            ],
+            "label": "comedones",
+        },
+    }
+
+    for marker in markers:
+        confidence = marker["confidence"]
+
+        if confidence < INDICATOR_CONFIDENCE_THRESHOLD:
+            continue
+
+        label = str(marker.get("className") or marker.get("type") or "").lower()
+
+        for indicator_key, rule in indicator_rules.items():
+            if any(keyword in label for keyword in rule["keywords"]):
+                promote_indicator(
+                    status,
+                    indicator_key,
+                    confidence,
+                    f"Model detected: {marker.get('className') or marker.get('type')}",
+                )
+
+        if any(keyword in label for keyword in ["acne", "pimple", "lesion"]):
+            marker["indicatorHint"] = "acne lesions"
+
+    if status["redness"]["status"] == "not prominent":
+        redness_score = calculate_redness_score(image, markers)
+        evidence = f"Redness score inside detections: {redness_score['label']}"
+
+        if redness_score["score"] >= 22:
+            promote_indicator(
+                status,
+                "redness",
+                redness_score["confidence"],
+                evidence,
+            )
+        else:
+            status["redness"]["confidence"] = redness_score["confidence"]
+            status["redness"]["evidence"] = evidence
+
+    return status
+
+
+def empty_indicator_status(evidence: str) -> dict[str, dict[str, Any]]:
+    return {
+        "redness": {
+            "status": "not prominent",
+            "confidence": 0,
+            "evidence": evidence,
+        },
+        "inflamedLesions": {
+            "status": "not prominent",
+            "confidence": 0,
+            "evidence": evidence,
+        },
+        "comedones": {
+            "status": "not prominent",
+            "confidence": 0,
+            "evidence": evidence,
+        },
+        "scarringRisk": {
+            "status": "not prominent",
+            "confidence": 0,
+            "evidence": evidence,
+        },
+    }
+
+
+def promote_indicator(
+    status: dict[str, dict[str, Any]],
+    indicator_key: str,
+    confidence: int,
+    evidence: str,
+) -> None:
+    if confidence <= status[indicator_key]["confidence"]:
+        return
+
+    status[indicator_key] = {
+        "status": "prominent",
+        "confidence": confidence,
+        "evidence": evidence,
+    }
+
+
+def calculate_redness_score(image: Image.Image, markers: list[dict[str, Any]]) -> dict[str, Any]:
+    if not markers:
+        return {"confidence": 0, "label": "not assessed", "score": 0}
+
+    width, height = image.size
+    pixels = image.load()
+    candidate_pixels = 0
+    sampled_pixels = 0
+    red_score_total = 0.0
+
+    for marker in markers:
+        x1 = int((marker["x"] / 100) * width)
+        y1 = int((marker["y"] / 100) * height)
+        x2 = int(((marker["x"] + marker["width"]) / 100) * width)
+        y2 = int(((marker["y"] + marker["height"]) / 100) * height)
+        x1 = max(0, min(width - 1, x1))
+        y1 = max(0, min(height - 1, y1))
+        x2 = max(x1 + 1, min(width, x2))
+        y2 = max(y1 + 1, min(height, y2))
+        step = max(1, int(max(x2 - x1, y2 - y1) / 28))
+
+        for y in range(y1, y2, step):
+            for x in range(x1, x2, step):
+                r, g, b = pixels[x, y]
+                brightness = (r + g + b) / 3
+                red_score = r - max(g, b)
+                saturation = max(r, g, b) - min(r, g, b)
+                sampled_pixels += 1
+
+                if (
+                    red_score > 35
+                    and saturation > 30
+                    and r > 90
+                    and 50 < brightness < 230
+                ):
+                    candidate_pixels += 1
+                    red_score_total += red_score + saturation * 0.25
+
+    if sampled_pixels == 0:
+        return {"confidence": 0, "label": "not assessed", "score": 0}
+
+    candidate_ratio = candidate_pixels / sampled_pixels
+    average_red_score = red_score_total / candidate_pixels if candidate_pixels else 0
+    score = candidate_ratio * 100 + average_red_score * 0.28
+    confidence = round(min(100, max(0, score * 2.2)))
+    label = "high" if score >= 22 else "low"
+
+    return {"confidence": confidence, "label": label, "score": score}
+
+
+def get_detected_indicators(
+    markers: list[dict[str, Any]], indicator_status: dict[str, dict[str, Any]]
+) -> list[str]:
     indicators: list[str] = []
 
-    if any(term in labels for term in ["acne", "pimple", "lesion", "spot", "blemish"]):
-        indicators.append("model detections")
+    if any(marker.get("indicatorHint") == "acne lesions" for marker in markers):
+        indicators.append("acne lesions")
 
-    if any(marker["confidence"] >= 75 for marker in markers):
-        indicators.append("high-confidence detections")
+    indicator_labels = {
+        "redness": "redness",
+        "inflamedLesions": "inflamed lesions",
+        "comedones": "comedones",
+        "scarringRisk": "post-acne marks",
+    }
 
-    if severity_score > 70:
-        indicators.append("scarring risk")
+    for indicator_key, label in indicator_labels.items():
+        if indicator_status[indicator_key]["status"] == "prominent":
+            indicators.append(label)
 
     return indicators
 
 
-def get_suggested_next_step(severity_level: str) -> str:
-    if severity_level == "severe":
+def get_suggested_next_step(indicator_status: dict[str, dict[str, Any]]) -> str:
+    if indicator_status["scarringRisk"]["status"] == "prominent":
         return (
-            "Prioritize dermatologist review of the YOLO detections before any "
-            "clinical decision or treatment change."
+            "Dermatologist review recommended to assess post-acne marks and "
+            "treatment response."
         )
-    if severity_level == "moderate":
+    if indicator_status["inflamedLesions"]["status"] == "prominent":
         return (
-            "Dermatologist should compare detections with prior images and review "
-            "adherence, irritation, and symptom changes."
+            "Dermatologist review recommended because inflamed lesions were "
+            "detected."
         )
     return (
-        "Continue monitoring and route the model output for dermatologist review "
-        "as part of the prototype workflow."
+        "Continue weekly monitoring and request dermatologist review if symptoms "
+        "worsen."
     )
 
 
