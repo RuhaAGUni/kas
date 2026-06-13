@@ -504,6 +504,10 @@ button {
   color: #991b1b;
 }
 
+.source-pill {
+  margin-left: 8px;
+}
+
 .upload-dropzone {
   align-items: center;
   background: #f8fafc;
@@ -686,6 +690,11 @@ button {
   z-index: 2;
 }
 
+.acne-marker.backend-box {
+  min-height: 18px;
+  min-width: 18px;
+}
+
 .acne-marker.redness {
   background: rgba(251, 113, 133, 0.14);
   border-color: rgba(244, 63, 94, 0.85);
@@ -731,6 +740,15 @@ button {
   color: #0f172a;
   margin: 10px 0 6px;
   overflow-wrap: anywhere;
+}
+
+.analysis-status-message {
+  color: #475569;
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.45;
+  margin: 6px 0;
 }
 
 .analysis-image-meta p {
@@ -909,6 +927,10 @@ button {
   gap: 8px;
 }
 
+.analysis-source-row {
+  margin: 16px 0 4px;
+}
+
 .severity-badge {
   border-radius: 999px;
   font-size: 13px;
@@ -935,7 +957,7 @@ button {
 .analysis-score-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .analysis-score-card {
@@ -957,6 +979,7 @@ button {
   font-size: 32px;
   letter-spacing: -0.05em;
   margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 
 .overlay-summary-panel {

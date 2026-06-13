@@ -31,9 +31,10 @@ import {
 import './App.css'
 
 const SAFETY_DISCLAIMER =
-  'Prototype only. Not a medical diagnosis. Dermatologist review required.'
+  'AI model output for prototype support only. Not a medical diagnosis. Dermatologist review required.'
 const CHAT_SAFETY_DISCLAIMER =
-  'Prototype only. Not medical advice. Dermatologist review required.'
+  'AI model output for prototype support only. Not a medical diagnosis. Dermatologist review required.'
+const BACKEND_ANALYSIS_URL = 'http://localhost:8000/analyze-skin-image'
 
 const quickPrompts = {
   dermatologist: [
@@ -248,6 +249,100 @@ async function analyzeImageWithCanvas(imageUrl) {
     .slice(0, strongClusters.length > 0 ? 9 : 2)
 
   return buildCanvasAnalysisResult(selectedClusters, width, height, strongClusters.length > 0)
+}
+
+async function analyzeImageWithBackend(selectedImage) {
+  const file = await getImageFileForUpload(selectedImage)
+  const formData = new FormData()
+
+  formData.append('file', file)
+
+  const response = await fetch(BACKEND_ANALYSIS_URL, {
+    body: formData,
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    throw new Error(`Backend returned HTTP ${response.status}`)
+  }
+
+  const result = await response.json()
+
+  if (!result.modelLoaded) {
+    throw new Error(result.error || 'YOLO model unavailable')
+  }
+
+  return normalizeBackendAnalysisResult(result)
+}
+
+async function getImageFileForUpload(selectedImage) {
+  if (selectedImage.file) {
+    return selectedImage.file
+  }
+
+  const response = await fetch(selectedImage.src)
+
+  if (!response.ok) {
+    throw new Error(`Could not read selected image: HTTP ${response.status}`)
+  }
+
+  const blob = await response.blob()
+
+  return new File([blob], selectedImage.name || 'skintrack-image.jpg', {
+    type: blob.type || 'image/jpeg',
+  })
+}
+
+function normalizeBackendAnalysisResult(result) {
+  return {
+    ...result,
+    confidence: Math.round(result.confidence || 0),
+    detectedIndicators: result.detectedIndicators || [],
+    lesionCount: result.lesionCount || 0,
+    markers: (result.markers || []).map((marker, index) => ({
+      classId: marker.classId,
+      className: marker.className || marker.type,
+      confidence: Math.round(marker.confidence || 0),
+      height: marker.height ?? marker.size ?? 8,
+      label: marker.className || marker.type || `detection ${index + 1}`,
+      type: marker.className || marker.type || `detection ${index + 1}`,
+      width: marker.width ?? marker.size ?? 8,
+      x: marker.x || 0,
+      y: marker.y || 0,
+    })),
+    modelLoaded: true,
+    safetyDisclaimer: result.safetyDisclaimer || SAFETY_DISCLAIMER,
+    source: 'real-yolo-model',
+    statusMessage: 'Real YOLO model detections returned by the FastAPI backend.',
+  }
+}
+
+async function buildPrototypeFallbackResult(selectedImage, error) {
+  let fallbackResult
+
+  try {
+    fallbackResult = await analyzeImageWithCanvas(selectedImage.src)
+  } catch {
+    fallbackResult = analyzeSkinImage(selectedImage.name || selectedImage.src)
+  }
+
+  return {
+    ...fallbackResult,
+    modelLoaded: false,
+    safetyDisclaimer: SAFETY_DISCLAIMER,
+    source: 'prototype-fallback',
+    statusMessage: `${getFallbackReason(error)} Using prototype fallback analysis.`,
+  }
+}
+
+function getFallbackReason(error) {
+  const message = error instanceof Error ? error.message : String(error || '')
+
+  if (message.includes('Failed to fetch') || message.includes('NetworkError')) {
+    return 'Backend unavailable.'
+  }
+
+  return 'Backend model unavailable.'
 }
 
 function loadImageForCanvas(imageUrl) {
@@ -645,6 +740,12 @@ function withChatSafety(message) {
   return `${message}\n\n${CHAT_SAFETY_DISCLAIMER}`
 }
 
+function getAnalysisSourceLabel(result) {
+  return result?.source === 'real-yolo-model' && result?.modelLoaded
+    ? 'Real YOLO model'
+    : 'Prototype fallback'
+}
+
 function App() {
   const [activeSection, setActiveSection] = useState('check-in')
   const [qualityScore, setQualityScore] = useState(7)
@@ -761,6 +862,7 @@ function App() {
     }
 
     setSelectedImage({
+      file,
       id: `upload-${file.name}`,
       name: file.name,
       source: 'upload',
@@ -786,10 +888,11 @@ function App() {
     setIsAnalyzing(true)
 
     try {
-      const canvasResult = await analyzeImageWithCanvas(selectedImage.src)
-      setAnalysisResult(canvasResult)
-    } catch {
-      setAnalysisResult(analyzeSkinImage(selectedImage.name || selectedImage.src))
+      const yoloResult = await analyzeImageWithBackend(selectedImage)
+      setAnalysisResult(yoloResult)
+    } catch (error) {
+      const fallbackResult = await buildPrototypeFallbackResult(selectedImage, error)
+      setAnalysisResult(fallbackResult)
     } finally {
       setShowOverlay(true)
       setSelectedPatientId('patient-upload')
@@ -972,6 +1075,11 @@ function App() {
                     </div>
                     <div className="analysis-image-meta">
                       <strong>{selectedImage.name}</strong>
+                      {analysisResult?.statusMessage && (
+                        <span className="analysis-status-message">
+                          {analysisResult.statusMessage}
+                        </span>
+                      )}
                       <p>{SAFETY_DISCLAIMER}</p>
                     </div>
                   </>
@@ -1033,10 +1141,11 @@ function App() {
             <div className="analysis-control">
               <div>
                 <p className="eyebrow">Prototype-only AI</p>
-                <strong>Generate simulated acne analysis</strong>
+                <strong>Run YOLO acne analysis</strong>
                 <span>
-                  Browser-side canvas heuristics inspect red/pink pixel clusters
-                  for repeatable prototype markers.
+                  Sends the selected image to the FastAPI YOLO backend. If the
+                  backend is unavailable, the app uses prototype fallback
+                  analysis.
                 </span>
               </div>
               <button
@@ -1046,7 +1155,7 @@ function App() {
                 type="button"
               >
                 <Brain size={18} />
-                {isAnalyzing ? 'Analyzing image...' : 'Run AI Analysis'}
+                {isAnalyzing ? 'Analyzing with YOLO...' : 'Run AI Analysis'}
               </button>
             </div>
 
@@ -1102,17 +1211,30 @@ function App() {
             <ScoreBar label="Adherence" tone="success" value={latestWeek.adherence} />
             <ScoreBar label="Side effects" tone="danger" value={latestWeek.sideEffects} />
             {analysisResult && (
-              <ScoreBar
-                label="Confidence"
-                tone="success"
-                value={analysisResult.confidence}
-              />
+              <>
+                <div className="analysis-source-row">
+                  <span
+                    className={
+                      analysisResult.source === 'real-yolo-model'
+                        ? 'status-pill success'
+                        : 'status-pill alert'
+                    }
+                  >
+                    {getAnalysisSourceLabel(analysisResult)}
+                  </span>
+                </div>
+                <ScoreBar
+                  label="Confidence"
+                  tone="success"
+                  value={analysisResult.confidence}
+                />
+              </>
             )}
             <div className="ai-note">
               <Sparkles size={18} />
               <p>
                 {analysisResult
-                  ? `Simulated prototype-only analysis classifies this image as ${analysisResult.severityLevel} acne severity. ${SAFETY_DISCLAIMER}`
+                  ? `${getAnalysisSourceLabel(analysisResult)} classifies this image as ${analysisResult.severityLevel} severity for prototype support. ${SAFETY_DISCLAIMER}`
                   : `Simulated AI sees improvement, stable irritation, and strong medication adherence. ${SAFETY_DISCLAIMER}`}
               </p>
             </div>
@@ -1256,6 +1378,17 @@ function App() {
                 </div>
                 <div>
                   <span className="status-pill alert">Dermatologist review required</span>
+                  {selectedPatient.analysis && (
+                    <span
+                      className={
+                        selectedPatient.analysis.source === 'real-yolo-model'
+                          ? 'status-pill success source-pill'
+                          : 'status-pill alert source-pill'
+                      }
+                    >
+                      {getAnalysisSourceLabel(selectedPatient.analysis)}
+                    </span>
+                  )}
                   <strong>{selectedPatient.imageName}</strong>
                   <p>{SAFETY_DISCLAIMER}</p>
                 </div>
@@ -1288,7 +1421,7 @@ function App() {
                 </strong>
                 <p>
                   {selectedPatient.analysis.lesionCount} prototype marker
-                  regions were generated. Detected indicators are simulated:{' '}
+                  region(s) were generated. Detected indicators:{' '}
                   {selectedPatient.analysis.detectedIndicators.join(', ') || 'none'}.
                 </p>
               </div>
@@ -1580,38 +1713,73 @@ function MarkerOverlay({ compact = false, markers }) {
   return (
     <div className={compact ? 'marker-overlay compact' : 'marker-overlay'}>
       <div className="heatmap-layer">
-        {markers.map((marker, index) => (
-          <span
-            className={`heatmap-spot ${marker.type}`}
-            key={`heat-${marker.type}-${index}`}
-            style={{
-              height: `${marker.size * 2.4}%`,
-              left: `${marker.x}%`,
-              top: `${marker.y}%`,
-              width: `${marker.size * 2.4}%`,
-            }}
-          ></span>
-        ))}
+        {markers.map((marker, index) => {
+          const box = getMarkerBox(marker)
+
+          return (
+            <span
+              className={`heatmap-spot ${marker.type}`}
+              key={`heat-${marker.type}-${index}`}
+              style={{
+                height: `${box.height * 2.2}%`,
+                left: `${box.centerX}%`,
+                top: `${box.centerY}%`,
+                width: `${box.width * 2.2}%`,
+              }}
+            ></span>
+          )
+        })}
       </div>
-      {markers.map((marker, index) => (
-        <div
-          className={`acne-marker ${marker.type}`}
-          key={`${marker.type}-${index}`}
-          style={{
-            height: `${marker.size}%`,
-            left: `${marker.x}%`,
-            top: `${marker.y}%`,
-            width: `${marker.size * 1.55}%`,
-          }}
-          title={`${marker.label} · simulated confidence ${marker.confidence}%`}
-        >
-          <span>
-            {marker.label} {marker.confidence}%
-          </span>
-        </div>
-      ))}
+      {markers.map((marker, index) => {
+        const box = getMarkerBox(marker)
+
+        return (
+          <div
+            className={`acne-marker ${marker.type} ${box.isBackendBox ? 'backend-box' : ''}`}
+            key={`${marker.type}-${index}`}
+            style={{
+              height: `${box.height}%`,
+              left: `${box.left}%`,
+              top: `${box.top}%`,
+              transform: box.isBackendBox ? 'none' : 'translate(-50%, -50%)',
+              width: `${box.width}%`,
+            }}
+            title={`${marker.label || marker.type} · model confidence ${marker.confidence}%`}
+          >
+            <span>
+              {marker.label || marker.type} {marker.confidence}%
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
+}
+
+function getMarkerBox(marker) {
+  const isBackendBox = Number.isFinite(marker.width) && Number.isFinite(marker.height)
+
+  if (isBackendBox) {
+    return {
+      centerX: marker.x + marker.width / 2,
+      centerY: marker.y + marker.height / 2,
+      height: marker.height,
+      isBackendBox,
+      left: marker.x,
+      top: marker.y,
+      width: marker.width,
+    }
+  }
+
+  return {
+    centerX: marker.x,
+    centerY: marker.y,
+    height: marker.size,
+    isBackendBox,
+    left: marker.x,
+    top: marker.y,
+    width: marker.size * 1.55,
+  }
 }
 
 function AnalysisResults({ result, selectedImage }) {
@@ -1621,11 +1789,23 @@ function AnalysisResults({ result, selectedImage }) {
     <div className="analysis-results">
       <div className="analysis-result-header">
         <div>
-          <p className="eyebrow">Simulated result</p>
-          <h3>Prototype-only acne analysis</h3>
+          <p className="eyebrow">Model result</p>
+          <h3>Prototype-support acne analysis</h3>
           <span>{selectedImage?.name}</span>
+          {result.statusMessage && (
+            <span className="analysis-status-message">{result.statusMessage}</span>
+          )}
         </div>
         <div className="analysis-badges">
+          <span
+            className={
+              result.source === 'real-yolo-model'
+                ? 'status-pill success'
+                : 'status-pill alert'
+            }
+          >
+            {getAnalysisSourceLabel(result)}
+          </span>
           <span className="status-pill alert">Dermatologist review required</span>
           <div className={`severity-badge ${result.severityLevel}`}>
             {result.severityLevel}
@@ -1645,6 +1825,10 @@ function AnalysisResults({ result, selectedImage }) {
         <div className="analysis-score-card">
           <span>Marked regions</span>
           <strong>{result.lesionCount}</strong>
+        </div>
+        <div className="analysis-score-card">
+          <span>Predicted label</span>
+          <strong>{result.predictedLabel || 'review'}</strong>
         </div>
       </div>
 
