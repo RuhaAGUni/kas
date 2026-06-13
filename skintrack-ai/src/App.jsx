@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -25,6 +25,31 @@ import {
 } from 'lucide-react'
 import './App.css'
 
+const SAFETY_DISCLAIMER =
+  'Prototype only. Not a medical diagnosis. Dermatologist review required.'
+
+const demoAcneModules = import.meta.glob(
+  '/public/demo-acne/*.{jpg,jpeg,png,webp,JPG,JPEG,PNG,WEBP}',
+  {
+    eager: true,
+    import: 'default',
+    query: '?url',
+  },
+)
+
+const demoAcneSamples = Object.keys(demoAcneModules)
+  .sort((first, second) => first.localeCompare(second))
+  .map((path, index) => {
+    const fileName = path.split('/').pop()
+
+    return {
+      id: `demo-acne-${index}`,
+      name: fileName,
+      source: 'sample',
+      src: `/demo-acne/${fileName}`,
+    }
+  })
+
 const weeklyMetrics = [
   { week: 'W1', severity: 72, adherence: 58, sideEffects: 18, qol: 44 },
   { week: 'W2', severity: 67, adherence: 64, sideEffects: 22, qol: 48 },
@@ -34,7 +59,7 @@ const weeklyMetrics = [
   { week: 'W6', severity: 41, adherence: 89, sideEffects: 14, qol: 76 },
 ]
 
-const reviewQueue = [
+const baselineReviewQueue = [
   {
     id: 'maya',
     name: 'Maya R.',
@@ -115,16 +140,120 @@ const cohortMetrics = [
   { label: 'Fitzpatrick V-VI', accuracy: 84, reviewRate: 19 },
 ]
 
+export function analyzeSkinImage(imageNameOrUrl) {
+  const seed = String(imageNameOrUrl || 'skintrack-demo-image').toLowerCase()
+  const hash = Array.from(seed).reduce(
+    (total, character, index) =>
+      (total + character.charCodeAt(0) * (index + 17)) % 100000,
+    0,
+  )
+  const severityScore = hash % 101
+  const severityLevel =
+    severityScore >= 67 ? 'severe' : severityScore >= 34 ? 'moderate' : 'mild'
+  const confidenceScore = 72 + (hash % 25)
+  const detectedVisualIndicators = [
+    {
+      label: 'redness',
+      detected: severityScore > 22 || hash % 2 === 0,
+    },
+    {
+      label: 'inflamed lesions',
+      detected: severityScore > 48 || hash % 5 === 0,
+    },
+    {
+      label: 'comedones',
+      detected: severityScore > 30 || hash % 3 === 0,
+    },
+    {
+      label: 'scarring risk',
+      detected: severityScore > 70 || hash % 11 === 0,
+    },
+  ]
+  const suggestedNextStep =
+    severityLevel === 'severe'
+      ? 'Prioritize dermatologist review, compare against prior photos, and discuss escalation options if clinically appropriate.'
+      : severityLevel === 'moderate'
+        ? 'Ask the dermatologist to review adherence, irritation, and whether the current plan needs adjustment.'
+        : 'Continue weekly tracking and send supportive adherence coaching for dermatologist approval.'
+
+  return {
+    confidenceScore,
+    detectedVisualIndicators,
+    safetyDisclaimer: SAFETY_DISCLAIMER,
+    severityLevel,
+    severityScore,
+    suggestedNextStep,
+  }
+}
+
 function App() {
   const [activeSection, setActiveSection] = useState('check-in')
   const [qualityScore, setQualityScore] = useState(7)
-  const [selectedPatientId, setSelectedPatientId] = useState('maya')
+  const [selectedPatientId, setSelectedPatientId] = useState('patient-upload')
   const [actionStatus, setActionStatus] = useState({})
+  const [selectedImage, setSelectedImage] = useState(() => demoAcneSamples[0] || null)
+  const [analysisResult, setAnalysisResult] = useState(null)
 
+  useEffect(() => {
+    if (selectedImage?.source !== 'upload') {
+      return undefined
+    }
+
+    return () => URL.revokeObjectURL(selectedImage.src)
+  }, [selectedImage])
+
+  const currentSeverity = analysisResult?.severityScore ?? weeklyMetrics.at(-1).severity
+  const displayMetrics = weeklyMetrics.map((metric, index) =>
+    index === weeklyMetrics.length - 1
+      ? {
+          ...metric,
+          severity: currentSeverity,
+        }
+      : metric,
+  )
+  const latestWeek = displayMetrics.at(-1)
+  const previousWeek = displayMetrics.at(-2)
+  const severityDelta = latestWeek.severity - previousWeek.severity
+  const severityTrend =
+    severityDelta <= 0
+      ? `${Math.abs(severityDelta)} pts better vs W5`
+      : `${severityDelta} pts higher vs W5`
+  const analysisPriority =
+    analysisResult?.severityLevel === 'severe'
+      ? 'High'
+      : analysisResult?.severityLevel === 'mild'
+        ? 'Low'
+        : 'Medium'
+  const patientUploadReview = {
+    id: 'patient-upload',
+    name: 'Demo Patient',
+    age: 22,
+    condition: 'Acne',
+    priority: analysisPriority,
+    severity: currentSeverity,
+    trend: severityDelta <= 0 ? `${severityDelta}%` : `+${severityDelta}%`,
+    adherence: latestWeek.adherence,
+    qol: latestWeek.qol,
+    lastUpload: selectedImage ? 'Selected now' : 'Awaiting image',
+    due: analysisResult
+      ? `${analysisResult.severityLevel} simulated acne analysis`
+      : 'Needs photo analysis',
+    aiAction:
+      analysisResult?.suggestedNextStep ||
+      'Select or upload a face image, run the simulated AI analysis, then route results for dermatologist review.',
+    flags: analysisResult
+      ? analysisResult.detectedVisualIndicators
+          .filter((indicator) => indicator.detected)
+          .map((indicator) => indicator.label)
+      : ['Awaiting simulated analysis'],
+    imageName: selectedImage?.name,
+    uploadedImage: selectedImage?.src,
+    analysis: analysisResult,
+  }
+  const reviewQueue = [patientUploadReview, ...baselineReviewQueue]
   const selectedPatient =
     reviewQueue.find((patient) => patient.id === selectedPatientId) ||
     reviewQueue[0]
-  const latestWeek = weeklyMetrics[weeklyMetrics.length - 1]
 
   const handleNavClick = (sectionId) => {
     setActiveSection(sectionId)
@@ -133,6 +262,38 @@ function App() {
 
   const handleAction = (patientId, action) => {
     setActionStatus((current) => ({ ...current, [patientId]: action }))
+  }
+
+  const handleImageUpload = (event) => {
+    const file = event.target.files?.[0]
+
+    if (!file) {
+      return
+    }
+
+    setSelectedImage({
+      id: `upload-${file.name}`,
+      name: file.name,
+      source: 'upload',
+      src: URL.createObjectURL(file),
+    })
+    setAnalysisResult(null)
+    setSelectedPatientId('patient-upload')
+  }
+
+  const handleSampleSelect = (sample) => {
+    setSelectedImage(sample)
+    setAnalysisResult(null)
+    setSelectedPatientId('patient-upload')
+  }
+
+  const handleRunAnalysis = () => {
+    if (!selectedImage) {
+      return
+    }
+
+    setAnalysisResult(analyzeSkinImage(selectedImage.name || selectedImage.src))
+    setSelectedPatientId('patient-upload')
   }
 
   return (
@@ -174,10 +335,7 @@ function App() {
         <div className="sidebar-card">
           <p className="eyebrow">Prototype mode</p>
           <strong>Simulated AI outputs</strong>
-          <span>
-            Built for Product Track demo use only. Dermatologists approve every
-            suggested action.
-          </span>
+          <span>{SAFETY_DISCLAIMER}</span>
         </div>
       </aside>
 
@@ -191,6 +349,10 @@ function App() {
               treatment check-ins, and gives dermatologists a prioritized review
               workflow with safety guardrails.
             </p>
+            <div className="prototype-banner">
+              <AlertTriangle size={18} />
+              <span>{SAFETY_DISCLAIMER}</span>
+            </div>
             <div className="hero-actions">
               <button className="primary-action" type="button">
                 Start weekly check-in <ChevronRight size={18} />
@@ -207,14 +369,26 @@ function App() {
                 <span>Week 6 upload</span>
                 <CheckCircle size={18} />
               </div>
-              <div className="face-preview" aria-label="Simulated face photo upload">
-                <Camera size={42} />
-                <div className="scan-ring one"></div>
-                <div className="scan-ring two"></div>
+              <div className="face-preview" aria-label="Selected face image preview">
+                {selectedImage ? (
+                  <img src={selectedImage.src} alt={`${selectedImage.name} preview`} />
+                ) : (
+                  <>
+                    <Camera size={42} />
+                    <div className="scan-ring one"></div>
+                    <div className="scan-ring two"></div>
+                  </>
+                )}
               </div>
               <div className="upload-meta">
-                <strong>Front + left + right photos received</strong>
-                <span>Lighting quality: good · Blur risk: low</span>
+                <strong>
+                  {selectedImage ? selectedImage.name : 'Awaiting patient photo'}
+                </strong>
+                <span>
+                  {analysisResult
+                    ? `Simulated severity: ${analysisResult.severityScore}/100`
+                    : 'Run simulated AI analysis after selecting an image'}
+                </span>
               </div>
             </div>
           </div>
@@ -230,14 +404,109 @@ function App() {
               <span className="status-pill success">Ready to submit</span>
             </div>
 
-            <div className="upload-dropzone">
-              <UploadCloud size={28} />
-              <div>
-                <strong>Upload this week&apos;s face photos</strong>
-                <span>Front, left profile, right profile · JPG or PNG</span>
+            <div className="image-workflow">
+              <div className="upload-dropzone">
+                <UploadCloud size={28} />
+                <div>
+                  <strong>Upload this week&apos;s face image</strong>
+                  <span>Choose a JPG, PNG, or WebP from your computer</span>
+                </div>
+                <label className="file-button" htmlFor="skin-image-upload">
+                  Choose file
+                  <input
+                    accept="image/*"
+                    id="skin-image-upload"
+                    onChange={handleImageUpload}
+                    type="file"
+                  />
+                </label>
               </div>
-              <button type="button">Choose files</button>
+
+              <div className="selected-image-card">
+                {selectedImage ? (
+                  <>
+                    <img src={selectedImage.src} alt={`${selectedImage.name} selected`} />
+                    <div>
+                      <span className="status-pill">
+                        {selectedImage.source === 'upload'
+                          ? 'Uploaded image'
+                          : 'Demo sample selected'}
+                      </span>
+                      <strong>{selectedImage.name}</strong>
+                      <p>{SAFETY_DISCLAIMER}</p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="empty-preview">
+                    <Camera size={28} />
+                    <strong>No image selected</strong>
+                    <span>Upload a face image or choose a sample below.</span>
+                  </div>
+                )}
+              </div>
             </div>
+
+            <div className="sample-gallery-block">
+              <div className="section-heading compact">
+                <div>
+                  <p className="eyebrow">Sample gallery</p>
+                  <h2>Images from /demo-acne</h2>
+                </div>
+                <Camera size={22} />
+              </div>
+              {demoAcneSamples.length > 0 ? (
+                <div className="sample-gallery">
+                  {demoAcneSamples.map((sample) => (
+                    <button
+                      className={
+                        selectedImage?.id === sample.id
+                          ? 'sample-tile selected'
+                          : 'sample-tile'
+                      }
+                      key={sample.id}
+                      onClick={() => handleSampleSelect(sample)}
+                      type="button"
+                    >
+                      <img src={sample.src} alt={`${sample.name} acne sample`} />
+                      <span>{sample.name}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="gallery-empty">
+                  <AlertTriangle size={20} />
+                  <span>
+                    No sample files were found in public/demo-acne in this
+                    workspace. Upload still works, and gallery samples will
+                    appear here when images are added.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="analysis-control">
+              <div>
+                <p className="eyebrow">Prototype-only AI</p>
+                <strong>Generate simulated acne analysis</strong>
+                <span>
+                  Deterministic results are based on the image filename or
+                  selected sample path for repeatable demos.
+                </span>
+              </div>
+              <button
+                className="primary-action"
+                disabled={!selectedImage}
+                onClick={handleRunAnalysis}
+                type="button"
+              >
+                <Brain size={18} />
+                Run AI Analysis
+              </button>
+            </div>
+
+            {analysisResult && (
+              <AnalysisResults result={analysisResult} selectedImage={selectedImage} />
+            )}
 
             <div className="checkin-list">
               {checkInItems.map((item) => {
@@ -286,11 +555,19 @@ function App() {
             <ScoreBar label="Severity" tone="warning" value={latestWeek.severity} />
             <ScoreBar label="Adherence" tone="success" value={latestWeek.adherence} />
             <ScoreBar label="Side effects" tone="danger" value={latestWeek.sideEffects} />
+            {analysisResult && (
+              <ScoreBar
+                label="Confidence"
+                tone="success"
+                value={analysisResult.confidenceScore}
+              />
+            )}
             <div className="ai-note">
               <Sparkles size={18} />
               <p>
-                Simulated AI sees improvement, stable irritation, and strong
-                medication adherence. No urgent escalation detected.
+                {analysisResult
+                  ? `Simulated prototype-only analysis classifies this image as ${analysisResult.severityLevel} acne severity. ${SAFETY_DISCLAIMER}`
+                  : `Simulated AI sees improvement, stable irritation, and strong medication adherence. ${SAFETY_DISCLAIMER}`}
               </p>
             </div>
           </div>
@@ -308,7 +585,7 @@ function App() {
           <MetricCard
             icon={Activity}
             label="Severity trend"
-            trend="31 pts better"
+            trend={analysisResult ? 'Updated from simulated image analysis' : severityTrend}
             value={`${latestWeek.severity}/100`}
           />
           <MetricCard
@@ -333,7 +610,7 @@ function App() {
               <LineChart size={24} />
             </div>
             <div className="bar-chart" aria-label="Six week progress chart">
-              {weeklyMetrics.map((metric) => (
+              {displayMetrics.map((metric) => (
                 <div className="week-column" key={metric.week}>
                   <div className="bar-stack">
                     <span
@@ -352,7 +629,10 @@ function App() {
                       title={`Quality of life ${metric.qol}`}
                     ></span>
                   </div>
-                  <strong>{metric.week}</strong>
+                  <strong>
+                    {metric.week}
+                    {metric.week === 'W6' && analysisResult ? ' AI' : ''}
+                  </strong>
                 </div>
               ))}
             </div>
@@ -370,7 +650,7 @@ function App() {
               <p className="eyebrow">Dermatologist dashboard</p>
               <h2>Patients who need review</h2>
             </div>
-            <span className="status-pill alert">3 open reviews</span>
+            <span className="status-pill alert">{reviewQueue.length} open reviews</span>
           </div>
 
           <div className="card patient-queue">
@@ -385,12 +665,21 @@ function App() {
                 onClick={() => setSelectedPatientId(patient.id)}
                 type="button"
               >
-                <div className="patient-avatar">{patient.name.charAt(0)}</div>
+                {patient.uploadedImage ? (
+                  <img
+                    className="patient-thumbnail"
+                    src={patient.uploadedImage}
+                    alt={`${patient.name} uploaded acne review`}
+                  />
+                ) : (
+                  <div className="patient-avatar">{patient.name.charAt(0)}</div>
+                )}
                 <div>
                   <strong>{patient.name}</strong>
                   <span>
                     {patient.condition} · age {patient.age} · {patient.lastUpload}
                   </span>
+                  {patient.imageName && <span>{patient.imageName}</span>}
                 </div>
                 <span className={`priority ${patient.priority.toLowerCase()}`}>
                   {patient.priority}
@@ -408,10 +697,31 @@ function App() {
               <Users size={24} />
             </div>
 
+            {selectedPatient.uploadedImage && (
+              <div className="clinician-image-review">
+                <img
+                  src={selectedPatient.uploadedImage}
+                  alt={`${selectedPatient.name} selected face review`}
+                />
+                <div>
+                  <span className="status-pill alert">Dermatologist review required</span>
+                  <strong>{selectedPatient.imageName}</strong>
+                  <p>{SAFETY_DISCLAIMER}</p>
+                </div>
+              </div>
+            )}
+
             <div className="review-stats">
               <ScoreBar label="Severity" tone="danger" value={selectedPatient.severity} />
               <ScoreBar label="Adherence" tone="warning" value={selectedPatient.adherence} />
               <ScoreBar label="Quality of life" tone="success" value={selectedPatient.qol} />
+              {selectedPatient.analysis && (
+                <ScoreBar
+                  label="Confidence"
+                  tone="success"
+                  value={selectedPatient.analysis.confidenceScore}
+                />
+              )}
             </div>
 
             <div className="flags">
@@ -420,12 +730,32 @@ function App() {
               ))}
             </div>
 
+            {selectedPatient.analysis && (
+              <div className="analysis-compact">
+                <strong>
+                  Simulated level: {selectedPatient.analysis.severityLevel}
+                </strong>
+                <p>
+                  Detected visual indicators are prototype-only: {' '}
+                  {selectedPatient.analysis.detectedVisualIndicators
+                    .map(
+                      (indicator) =>
+                        `${indicator.label} ${indicator.detected ? 'observed' : 'not prominent'}`,
+                    )
+                    .join(', ')}
+                  .
+                </p>
+              </div>
+            )}
+
             <div className="recommendation">
               <div className="recommendation-icon">
                 <Brain size={22} />
               </div>
               <div>
-                <strong>Suggested action requiring dermatologist approval</strong>
+                <strong>
+                  Suggested action requiring dermatologist approval
+                </strong>
                 <p>{selectedPatient.aiAction}</p>
               </div>
             </div>
@@ -512,14 +842,70 @@ function App() {
             <div>
               <h3>Prototype disclaimer</h3>
               <p>
-                SkinTrack AI is not a real medical diagnosis tool. All AI
-                severity scores, image checks, and recommendations in this demo
-                are simulated for product storytelling.
+                {SAFETY_DISCLAIMER} All AI severity scores, image checks, and
+                recommendations in this demo are simulated for product
+                storytelling.
               </p>
             </div>
           </div>
         </section>
       </main>
+    </div>
+  )
+}
+
+function AnalysisResults({ result, selectedImage }) {
+  return (
+    <div className="analysis-results">
+      <div className="analysis-result-header">
+        <div>
+          <p className="eyebrow">Simulated result</p>
+          <h3>Prototype-only acne analysis</h3>
+          <span>{selectedImage?.name}</span>
+        </div>
+        <div className={`severity-badge ${result.severityLevel}`}>
+          {result.severityLevel}
+        </div>
+      </div>
+
+      <div className="analysis-score-grid">
+        <div className="analysis-score-card">
+          <span>Acne severity score</span>
+          <strong>{result.severityScore}/100</strong>
+        </div>
+        <div className="analysis-score-card">
+          <span>Confidence score</span>
+          <strong>{result.confidenceScore}%</strong>
+        </div>
+      </div>
+
+      <div className="indicator-grid">
+        {result.detectedVisualIndicators.map((indicator) => (
+          <div
+            className={
+              indicator.detected ? 'indicator-chip detected' : 'indicator-chip'
+            }
+            key={indicator.label}
+          >
+            <CheckCircle size={16} />
+            <span>{indicator.label}</span>
+            <strong>{indicator.detected ? 'observed' : 'not prominent'}</strong>
+          </div>
+        ))}
+      </div>
+
+      <div className="next-step-card">
+        <Brain size={20} />
+        <div>
+          <strong>Suggested next step</strong>
+          <p>{result.suggestedNextStep}</p>
+        </div>
+      </div>
+
+      <div className="analysis-disclaimer">
+        <AlertTriangle size={18} />
+        <span>{result.safetyDisclaimer}</span>
+      </div>
     </div>
   )
 }
