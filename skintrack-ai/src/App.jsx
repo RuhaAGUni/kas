@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
+  Bot,
   Brain,
   CalendarCheck,
   Camera,
@@ -19,6 +20,7 @@ import {
   MessageSquare,
   Pill,
   Scale,
+  Send,
   ShieldCheck,
   Sparkles,
   Stethoscope,
@@ -30,6 +32,23 @@ import './App.css'
 
 const SAFETY_DISCLAIMER =
   'Prototype only. Not a medical diagnosis. Dermatologist review required.'
+const CHAT_SAFETY_DISCLAIMER =
+  'Prototype only. Not medical advice. Dermatologist review required.'
+
+const quickPrompts = {
+  dermatologist: [
+    'Summarize this patient',
+    'Why is this patient flagged?',
+    'Draft review note',
+    'List safety concerns',
+  ],
+  patient: [
+    'Explain my analysis',
+    'Help me with my weekly check-in',
+    'What does my severity score mean?',
+    'When should I contact my dermatologist?',
+  ],
+}
 
 const demoAcneModules = import.meta.glob(
   '/public/demo-acne/*.{jpg,jpeg,png,webp,JPG,JPEG,PNG,WEBP}',
@@ -506,6 +525,126 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
 
+function createAssistantResponse(mode, prompt, context) {
+  const normalizedPrompt = prompt.toLowerCase()
+
+  if (mentionsUrgentSymptoms(normalizedPrompt)) {
+    return withChatSafety(
+      'You mentioned symptoms that could need urgent attention, such as severe pain, swelling, allergic reaction, or rapidly worsening symptoms. Please seek professional medical help urgently or contact local emergency services if symptoms feel serious.',
+    )
+  }
+
+  if (mentionsMedicationChanges(normalizedPrompt)) {
+    return withChatSafety(
+      'I cannot recommend medication changes or treatment instructions. Only a dermatologist can approve, modify, or reject treatment changes after reviewing your case.',
+    )
+  }
+
+  if (mode === 'dermatologist') {
+    return createDermatologistResponse(normalizedPrompt, context)
+  }
+
+  return createPatientResponse(normalizedPrompt, context)
+}
+
+function createPatientResponse(prompt, context) {
+  if (prompt.includes('check-in') || prompt.includes('weekly')) {
+    return withChatSafety(
+      `For this week's check-in, confirm: treatment adherence (${context.adherence}%), side effects (${context.sideEffects}/100), quality-of-life impact (${context.qol}/100), perceived skin changes, and whether the uploaded image looks better, worse, or about the same. I can help explain terms, but I cannot recommend medication changes.`,
+    )
+  }
+
+  if (prompt.includes('severity score') || prompt.includes('mean')) {
+    return withChatSafety(
+      `Your current simulated severity score is ${context.severity}/100, labeled ${context.severityLevel}. In this prototype, lower scores suggest fewer or less intense marked regions, while higher scores suggest more or stronger redness/inflammation markers. It is not a diagnosis.`,
+    )
+  }
+
+  if (prompt.includes('contact') || prompt.includes('dermatologist') || prompt.includes('worse')) {
+    return withChatSafety(
+      'Contact a dermatologist if symptoms are rapidly worsening, side effects feel severe, swelling or allergic-reaction symptoms appear, or your treatment is difficult to tolerate. For urgent symptoms, seek professional medical help promptly.',
+    )
+  }
+
+  if (prompt.includes('analysis') || prompt.includes('redness') || prompt.includes('inflamed')) {
+    return withChatSafety(
+      `The simulated analysis found ${context.markerCount} marked region(s), with indicators: ${context.indicators}. "Redness" means the canvas heuristic found red/pink clusters. "Inflamed lesions" means larger or more intense red clusters. A dermatologist must review before any action.`,
+    )
+  }
+
+  return withChatSafety(
+    `I can help explain your simulated SkinTrack results, guide your weekly check-in, or clarify terms like severity score, adherence, redness, inflamed lesions, and dermatologist review. Current simulated severity is ${context.severity}/100 with adherence at ${context.adherence}%.`,
+  )
+}
+
+function createDermatologistResponse(prompt, context) {
+  if (prompt.includes('summarize')) {
+    return withChatSafety(
+      `Case summary: ${context.patientName} has simulated acne severity ${context.severity}/100 (${context.severityLevel}), adherence ${context.adherence}%, side effects ${context.sideEffects}/100, QoL ${context.qol}/100, and trend: ${context.severityTrend}. Image analysis shows ${context.markerCount} marker(s), indicators: ${context.indicators}. Review status: ${context.reviewStatus}.`,
+    )
+  }
+
+  if (prompt.includes('flagged') || prompt.includes('priority')) {
+    return withChatSafety(
+      `This patient may need review because severity is ${context.severity}/100, side effects are ${context.sideEffects}/100, adherence is ${context.adherence}%, and the queue priority is ${context.priority}. Consider asking about irritation, dryness, treatment consistency, and whether symptoms changed quickly. Dermatologist approval is required for any plan changes.`,
+    )
+  }
+
+  if (prompt.includes('draft') || prompt.includes('note')) {
+    return withChatSafety(
+      `Draft review note: Reviewed simulated SkinTrack upload and check-in. Severity ${context.severity}/100 (${context.severityLevel}); adherence ${context.adherence}%; side effects ${context.sideEffects}/100; QoL ${context.qol}/100; visual indicators: ${context.indicators}. Suggested review focus: irritation, dryness, adherence barriers, and comparison with prior photos. No treatment change auto-approved.`,
+    )
+  }
+
+  if (prompt.includes('safety') || prompt.includes('concern')) {
+    return withChatSafety(
+      `Safety concerns to review: severe or rapidly worsening symptoms, allergic-reaction symptoms, swelling, high irritation/dryness, low adherence, image-quality limitations, and bias/fairness limitations in simulated image scoring. AI output should be treated as decision support only.`,
+    )
+  }
+
+  return withChatSafety(
+    `Dermatologist Copilot can summarize the case, explain flags, draft a review note, or list safety concerns. Current case: severity ${context.severity}/100, adherence ${context.adherence}%, side effects ${context.sideEffects}/100, QoL ${context.qol}/100, review status ${context.reviewStatus}.`,
+  )
+}
+
+function mentionsMedicationChanges(prompt) {
+  return [
+    'change medication',
+    'change my medication',
+    'switch medication',
+    'stop medication',
+    'stop using',
+    'increase dose',
+    'decrease dose',
+    'dosage',
+    'prescribe',
+    'retinoid amount',
+    'antibiotic',
+    'accutane',
+    'isotretinoin',
+  ].some((phrase) => prompt.includes(phrase))
+}
+
+function mentionsUrgentSymptoms(prompt) {
+  return [
+    'severe pain',
+    'swelling',
+    'allergic reaction',
+    'trouble breathing',
+    'difficulty breathing',
+    'rapidly worsening',
+    'getting worse fast',
+    'face swelling',
+    'hives',
+    'throat',
+    'emergency',
+  ].some((phrase) => prompt.includes(phrase))
+}
+
+function withChatSafety(message) {
+  return `${message}\n\n${CHAT_SAFETY_DISCLAIMER}`
+}
+
 function App() {
   const [activeSection, setActiveSection] = useState('check-in')
   const [qualityScore, setQualityScore] = useState(7)
@@ -516,6 +655,14 @@ function App() {
   const [showOverlay, setShowOverlay] = useState(true)
   const [isGalleryOpen, setIsGalleryOpen] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [assistantMode, setAssistantMode] = useState('patient')
+  const [chatInput, setChatInput] = useState('')
+  const [chatMessages, setChatMessages] = useState([
+    {
+      role: 'assistant',
+      text: `Hi, I’m SkinTrack Assistant. I can help with weekly check-ins or dermatologist review summaries.\n\n${CHAT_SAFETY_DISCLAIMER}`,
+    },
+  ])
 
   useEffect(() => {
     if (selectedImage?.source !== 'upload') {
@@ -578,6 +725,19 @@ function App() {
   const selectedPatient =
     reviewQueue.find((patient) => patient.id === selectedPatientId) ||
     reviewQueue[0]
+  const assistantContext = {
+    adherence: latestWeek.adherence,
+    indicators: analysisResult?.detectedIndicators.join(', ') || 'none detected yet',
+    markerCount: analysisResult?.lesionCount ?? 0,
+    patientName: selectedPatient.name,
+    priority: selectedPatient.priority,
+    qol: latestWeek.qol,
+    reviewStatus: actionStatus[selectedPatient.id] || 'Pending dermatologist review',
+    severity: latestWeek.severity,
+    severityLevel: analysisResult?.severityLevel || 'not analyzed yet',
+    severityTrend,
+    sideEffects: latestWeek.sideEffects,
+  }
 
   const handleNavClick = (sectionId) => {
     setActiveSection(sectionId)
@@ -632,6 +792,27 @@ function App() {
     }
   }
 
+  const handleSendChatMessage = (messageText = chatInput) => {
+    const trimmedMessage = messageText.trim()
+
+    if (!trimmedMessage) {
+      return
+    }
+
+    const assistantReply = createAssistantResponse(
+      assistantMode,
+      trimmedMessage,
+      assistantContext,
+    )
+
+    setChatMessages((currentMessages) => [
+      ...currentMessages,
+      { role: 'user', text: trimmedMessage },
+      { role: 'assistant', text: assistantReply },
+    ])
+    setChatInput('')
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="SkinTrack AI navigation">
@@ -650,6 +831,7 @@ function App() {
             { id: 'check-in', label: 'Weekly check-in', icon: ClipboardCheck },
             { id: 'progress', label: 'Progress', icon: LineChart },
             { id: 'clinician', label: 'Derm dashboard', icon: Stethoscope },
+            { id: 'assistant', label: 'AI Assistant', icon: Bot },
             { id: 'safety', label: 'Fairness & safety', icon: Scale },
           ].map((item) => {
             const Icon = item.icon
@@ -1149,6 +1331,134 @@ function App() {
                 Current decision:{' '}
                 <strong>{actionStatus[selectedPatient.id] || 'Pending clinician review'}</strong>
               </span>
+            </div>
+          </div>
+        </section>
+
+        <section className="section-grid assistant-grid" id="assistant">
+          <div className="section-title-row">
+            <div>
+              <p className="eyebrow">Simulated chatbot</p>
+              <h2>AI Assistant</h2>
+            </div>
+            <span className="status-pill alert">{CHAT_SAFETY_DISCLAIMER}</span>
+          </div>
+
+          <div className="card assistant-card">
+            <div className="assistant-panel-header">
+              <div className="assistant-title">
+                <div className="assistant-avatar">
+                  <Bot size={22} />
+                </div>
+                <div>
+                  <strong>SkinTrack Assistant</strong>
+                  <span>
+                    Simulated support for patients and dermatologist review workflows
+                  </span>
+                </div>
+              </div>
+
+              <div className="mode-switch" aria-label="Assistant mode switch">
+                <button
+                  className={assistantMode === 'patient' ? 'active' : ''}
+                  onClick={() => setAssistantMode('patient')}
+                  type="button"
+                >
+                  Patient Assistant
+                </button>
+                <button
+                  className={assistantMode === 'dermatologist' ? 'active' : ''}
+                  onClick={() => setAssistantMode('dermatologist')}
+                  type="button"
+                >
+                  Dermatologist Copilot
+                </button>
+              </div>
+            </div>
+
+            <div className="assistant-context-grid">
+              <div>
+                <span>Latest severity</span>
+                <strong>{latestWeek.severity}/100</strong>
+              </div>
+              <div>
+                <span>Adherence</span>
+                <strong>{latestWeek.adherence}%</strong>
+              </div>
+              <div>
+                <span>Side effects</span>
+                <strong>{latestWeek.sideEffects}/100</strong>
+              </div>
+              <div>
+                <span>QoL score</span>
+                <strong>{latestWeek.qol}/100</strong>
+              </div>
+            </div>
+
+            <div className="quick-prompts">
+              {quickPrompts[assistantMode].map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => handleSendChatMessage(prompt)}
+                  type="button"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+
+            <div className="chat-window" aria-label="SkinTrack Assistant conversation">
+              {chatMessages.map((message, index) => (
+                <div
+                  className={`chat-message ${message.role}`}
+                  key={`${message.role}-${index}`}
+                >
+                  <div className="chat-bubble">
+                    {message.text.split('\n').map((line, lineIndex) => (
+                      <p key={`${line}-${lineIndex}`}>{line}</p>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <form
+              className="chat-input-row"
+              onSubmit={(event) => {
+                event.preventDefault()
+                handleSendChatMessage()
+              }}
+            >
+              <input
+                onChange={(event) => setChatInput(event.target.value)}
+                placeholder={
+                  assistantMode === 'patient'
+                    ? 'Ask about your check-in or simulated analysis...'
+                    : 'Ask for a case summary or review priorities...'
+                }
+                type="text"
+                value={chatInput}
+              />
+              <button type="submit">
+                <Send size={18} />
+                Send
+              </button>
+            </form>
+          </div>
+
+          <div className="card assistant-guardrail-card">
+            <MessageSquare size={24} />
+            <h3>Chatbot guardrails</h3>
+            <p>
+              The assistant can explain simulated analysis, summarize review
+              signals, and draft discussion prompts. It refuses medication-change
+              instructions and routes urgent symptoms to professional medical
+              help.
+            </p>
+            <div className="guardrail-list">
+              <span>No diagnosis</span>
+              <span>No medication changes</span>
+              <span>Dermatologist approval required</span>
             </div>
           </div>
         </section>
