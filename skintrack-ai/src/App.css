@@ -526,13 +526,48 @@ button {
   z-index: 2;
 }
 
+.heatmap-layer,
+.heatmap-spot {
+  position: absolute;
+}
+
+.heatmap-layer {
+  inset: 0;
+  opacity: 0.72;
+  z-index: 1;
+}
+
+.heatmap-spot {
+  background:
+    radial-gradient(circle, rgba(248, 113, 113, 0.48), rgba(244, 63, 94, 0.22) 42%, transparent 72%);
+  border-radius: 999px;
+  filter: blur(8px);
+  transform: translate(-50%, -50%);
+}
+
+.heatmap-spot.redness {
+  background:
+    radial-gradient(circle, rgba(251, 113, 133, 0.52), rgba(244, 63, 94, 0.2) 44%, transparent 72%);
+}
+
+.heatmap-spot.inflamed {
+  background:
+    radial-gradient(circle, rgba(239, 68, 68, 0.54), rgba(185, 28, 28, 0.24) 44%, transparent 72%);
+}
+
+.heatmap-spot.comedone {
+  background:
+    radial-gradient(circle, rgba(236, 72, 153, 0.44), rgba(190, 24, 93, 0.2) 44%, transparent 72%);
+}
+
 .acne-marker {
   align-items: flex-start;
-  background: rgba(244, 63, 94, 0.24);
-  border: 2px solid rgba(225, 29, 72, 0.88);
-  border-radius: 999px;
+  background: rgba(244, 63, 94, 0.12);
+  border: 2px solid rgba(225, 29, 72, 0.92);
+  border-radius: 12px;
   box-shadow:
-    0 0 0 4px rgba(244, 63, 94, 0.14),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.36),
+    0 0 0 3px rgba(244, 63, 94, 0.12),
     0 10px 24px rgba(136, 19, 55, 0.25);
   display: flex;
   justify-content: center;
@@ -540,34 +575,36 @@ button {
   min-width: 28px;
   position: absolute;
   transform: translate(-50%, -50%);
+  z-index: 2;
 }
 
 .acne-marker.redness {
-  background: rgba(251, 113, 133, 0.24);
+  background: rgba(251, 113, 133, 0.14);
   border-color: rgba(244, 63, 94, 0.85);
 }
 
 .acne-marker.inflamed {
-  background: rgba(239, 68, 68, 0.24);
+  background: rgba(239, 68, 68, 0.15);
   border-color: rgba(185, 28, 28, 0.9);
 }
 
 .acne-marker.comedone {
-  background: rgba(236, 72, 153, 0.22);
+  background: rgba(236, 72, 153, 0.13);
   border-color: rgba(190, 24, 93, 0.85);
-  border-radius: 12px;
 }
 
 .acne-marker span {
-  background: rgba(15, 23, 42, 0.88);
-  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
   color: #ffffff;
   font-size: 10px;
   font-weight: 900;
   line-height: 1;
-  padding: 5px 7px;
+  padding: 5px 6px;
   position: absolute;
-  top: -16px;
+  right: -8px;
+  top: -18px;
   white-space: nowrap;
 }
 
@@ -776,6 +813,69 @@ button {
   font-size: 32px;
   letter-spacing: -0.05em;
   margin-top: 4px;
+}
+
+.overlay-summary-panel {
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(15, 118, 110, 0.9)),
+    radial-gradient(circle at top right, rgba(103, 232, 249, 0.28), transparent 16rem);
+  border-radius: 22px;
+  color: #dbeafe;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 18px;
+}
+
+.overlay-summary-panel > div {
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.overlay-summary-panel span {
+  color: #b6d4ec;
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 5px;
+}
+
+.overlay-summary-panel strong {
+  color: #ffffff;
+  display: block;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  text-transform: capitalize;
+}
+
+.overlay-summary-panel .summary-wide {
+  grid-column: 1 / -1;
+}
+
+.overlay-summary-panel .summary-wide strong {
+  font-size: 15px;
+  line-height: 1.5;
+  text-transform: none;
+}
+
+.overlay-note {
+  align-items: flex-start;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 18px;
+  color: #9a3412;
+  display: flex;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 10px;
+  line-height: 1.55;
+  padding: 14px;
+}
+
+.overlay-note svg {
+  flex: 0 0 auto;
 }
 
 .indicator-grid {
@@ -1381,6 +1481,7 @@ button {
   .image-analysis-card,
   .clinician-image-review,
   .analysis-score-grid,
+  .overlay-summary-panel,
   .indicator-grid {
     align-items: stretch;
     grid-template-columns: 1fr;
