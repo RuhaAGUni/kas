@@ -6,6 +6,7 @@ import {
   CalendarCheck,
   Camera,
   CheckCircle,
+  ChevronDown,
   ChevronRight,
   ClipboardCheck,
   Clock,
@@ -159,14 +160,14 @@ function analyzeSkinImage(imageNameOrUrl) {
       : severityLevel === 'moderate'
         ? 4 + (hash % 3)
         : 2 + (hash % 3)
-  const markerTypes = ['lesion', 'redness', 'inflamed', 'comedone']
+  const markerTypes = ['blemish', 'redness', 'inflamed', 'comedone']
   const markers = Array.from({ length: lesionCount }, (_, index) => {
     const markerSeed = hash + index * 137
     const type = markerTypes[(markerSeed + index) % markerTypes.length]
 
     return {
       confidence: 68 + (markerSeed % 29),
-      label: type === 'lesion' ? `lesion ${index + 1}` : type,
+      label: type === 'blemish' ? `blemish ${index + 1}` : type,
       size: 9 + (markerSeed % 13),
       type,
       x: 22 + (markerSeed % 57),
@@ -198,6 +199,313 @@ function analyzeSkinImage(imageNameOrUrl) {
   }
 }
 
+async function analyzeImageWithCanvas(imageUrl) {
+  const image = await loadImageForCanvas(imageUrl)
+  const maxCanvasSize = 720
+  const scale = Math.min(1, maxCanvasSize / Math.max(image.naturalWidth, image.naturalHeight))
+  const width = Math.max(1, Math.round(image.naturalWidth * scale))
+  const height = Math.max(1, Math.round(image.naturalHeight * scale))
+  const canvas = document.createElement('canvas')
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+
+  if (!context) {
+    throw new Error('Canvas context unavailable')
+  }
+
+  canvas.width = width
+  canvas.height = height
+  context.drawImage(image, 0, 0, width, height)
+
+  const { data } = context.getImageData(0, 0, width, height)
+  const cells = collectRednessCells(data, width, height)
+  const strongClusters = buildRednessClusters(cells).filter(
+    (cluster) => cluster.strongCount > 1 || cluster.maxIntensity > 72,
+  )
+  const weakClusters = buildRednessClusters(cells).filter(
+    (cluster) => cluster.strongCount > 0 || cluster.maxIntensity > 48,
+  )
+  const selectedClusters = (strongClusters.length > 0 ? strongClusters : weakClusters)
+    .sort((first, second) => second.score - first.score)
+    .slice(0, strongClusters.length > 0 ? 9 : 2)
+
+  return buildCanvasAnalysisResult(selectedClusters, width, height, strongClusters.length > 0)
+}
+
+function loadImageForCanvas(imageUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+
+    if (!imageUrl.startsWith('blob:') && !imageUrl.startsWith('data:')) {
+      image.crossOrigin = 'anonymous'
+    }
+
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Image failed to load for canvas analysis'))
+    image.src = imageUrl
+  })
+}
+
+function collectRednessCells(data, width, height) {
+  const cells = new Map()
+  const step = 5
+  const cellSize = Math.max(24, Math.round(Math.min(width, height) / 18))
+
+  for (let y = 0; y < height; y += step) {
+    for (let x = 0; x < width; x += step) {
+      const offset = (y * width + x) * 4
+      const r = data[offset]
+      const g = data[offset + 1]
+      const b = data[offset + 2]
+      const maxChannel = Math.max(r, g, b)
+      const minChannel = Math.min(r, g, b)
+      const brightness = (r + g + b) / 3
+      const redScore = r - Math.max(g, b)
+      const saturation = maxChannel - minChannel
+      const strongCandidate =
+        redScore > 35 && saturation > 30 && r > 90 && brightness > 50 && brightness < 230
+      const weakCandidate =
+        redScore > 18 && saturation > 20 && r > 70 && brightness > 55 && brightness < 220
+
+      if (!strongCandidate && !weakCandidate) {
+        continue
+      }
+
+      const cellX = Math.floor(x / cellSize)
+      const cellY = Math.floor(y / cellSize)
+      const key = `${cellX}:${cellY}`
+      const intensity = redScore + saturation * 0.35
+      const cell =
+        cells.get(key) || {
+          cellX,
+          cellY,
+          count: 0,
+          maxIntensity: 0,
+          maxX: x,
+          maxY: y,
+          minX: x,
+          minY: y,
+          strongCount: 0,
+          sumIntensity: 0,
+          sumX: 0,
+          sumY: 0,
+        }
+
+      cell.count += 1
+      cell.strongCount += strongCandidate ? 1 : 0
+      cell.sumX += x
+      cell.sumY += y
+      cell.sumIntensity += intensity
+      cell.maxIntensity = Math.max(cell.maxIntensity, intensity)
+      cell.minX = Math.min(cell.minX, x)
+      cell.minY = Math.min(cell.minY, y)
+      cell.maxX = Math.max(cell.maxX, x)
+      cell.maxY = Math.max(cell.maxY, y)
+      cells.set(key, cell)
+    }
+  }
+
+  return cells
+}
+
+function buildRednessClusters(cells) {
+  const clusters = []
+  const visited = new Set()
+  const offsets = [-1, 0, 1]
+
+  for (const [key, cell] of cells) {
+    if (visited.has(key)) {
+      continue
+    }
+
+    const queue = [cell]
+    const clusterCells = []
+    visited.add(key)
+
+    while (queue.length > 0) {
+      const current = queue.shift()
+      clusterCells.push(current)
+
+      for (const dx of offsets) {
+        for (const dy of offsets) {
+          if (dx === 0 && dy === 0) {
+            continue
+          }
+
+          const neighborKey = `${current.cellX + dx}:${current.cellY + dy}`
+
+          if (visited.has(neighborKey) || !cells.has(neighborKey)) {
+            continue
+          }
+
+          visited.add(neighborKey)
+          queue.push(cells.get(neighborKey))
+        }
+      }
+    }
+
+    clusters.push(mergeClusterCells(clusterCells))
+  }
+
+  return clusters
+}
+
+function mergeClusterCells(clusterCells) {
+  const cluster = clusterCells.reduce(
+    (merged, cell) => ({
+      count: merged.count + cell.count,
+      maxIntensity: Math.max(merged.maxIntensity, cell.maxIntensity),
+      maxX: Math.max(merged.maxX, cell.maxX),
+      maxY: Math.max(merged.maxY, cell.maxY),
+      minX: Math.min(merged.minX, cell.minX),
+      minY: Math.min(merged.minY, cell.minY),
+      strongCount: merged.strongCount + cell.strongCount,
+      sumIntensity: merged.sumIntensity + cell.sumIntensity,
+      sumX: merged.sumX + cell.sumX,
+      sumY: merged.sumY + cell.sumY,
+    }),
+    {
+      count: 0,
+      maxIntensity: 0,
+      maxX: 0,
+      maxY: 0,
+      minX: Number.POSITIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      strongCount: 0,
+      sumIntensity: 0,
+      sumX: 0,
+      sumY: 0,
+    },
+  )
+
+  return {
+    ...cluster,
+    score: cluster.count * 0.75 + cluster.maxIntensity + cluster.strongCount * 1.8,
+  }
+}
+
+function buildCanvasAnalysisResult(clusters, width, height, hasStrongClusters) {
+  if (clusters.length === 0) {
+    return {
+      confidence: 38,
+      detectedIndicators: [],
+      lesionCount: 0,
+      markers: [],
+      safetyDisclaimer: SAFETY_DISCLAIMER,
+      severityLevel: 'mild',
+      severityScore: 12,
+      suggestedNextStep:
+        'No strong red clusters were found. Continue weekly tracking and ask the dermatologist to review if symptoms persist.',
+    }
+  }
+
+  const markers = clusters.map((cluster, index) => {
+    const averageIntensity = cluster.sumIntensity / cluster.count
+    const clusterWidth = ((cluster.maxX - cluster.minX) / width) * 100
+    const clusterHeight = ((cluster.maxY - cluster.minY) / height) * 100
+    const size = clamp(Math.max(clusterWidth, clusterHeight) + 6, 7, 22)
+    const type = getMarkerType(cluster, averageIntensity)
+
+    return {
+      confidence: clamp(
+        Math.round(
+          (hasStrongClusters ? 44 : 30) +
+            averageIntensity * 0.38 +
+            Math.min(18, cluster.count * 0.9) +
+            cluster.strongCount * 0.7,
+        ),
+        hasStrongClusters ? 58 : 34,
+        hasStrongClusters ? 96 : 58,
+      ),
+      intensity: Math.round(averageIntensity),
+      label: type,
+      size,
+      type,
+      x: clamp((cluster.sumX / cluster.count / width) * 100, 4, 96),
+      y: clamp((cluster.sumY / cluster.count / height) * 100, 4, 96),
+      sortIndex: index,
+    }
+  })
+  const intensities = markers.map((marker) => marker.intensity)
+  const averageIntensity = intensities.reduce((total, value) => total + value, 0) / markers.length
+  const averageSize = markers.reduce((total, marker) => total + marker.size, 0) / markers.length
+  const spread = getMarkerSpread(markers)
+  const severityScore = clamp(
+    Math.round(markers.length * 8 + averageIntensity * 0.42 + averageSize * 1.35 + spread * 0.16),
+    hasStrongClusters ? 24 : 8,
+    hasStrongClusters ? 100 : 34,
+  )
+  const severityLevel =
+    severityScore >= 67 ? 'severe' : severityScore >= 34 ? 'moderate' : 'mild'
+  const confidence = Math.round(
+    markers.reduce((total, marker) => total + marker.confidence, 0) / markers.length,
+  )
+  const detectedIndicators = getDetectedIndicators(markers, severityScore, averageIntensity)
+  const suggestedNextStep =
+    severityLevel === 'severe'
+      ? 'Canvas heuristics found multiple intense red clusters. Prioritize dermatologist review before any treatment change.'
+      : severityLevel === 'moderate'
+        ? 'Canvas heuristics found localized redness. Dermatologist should review adherence, irritation, and recent treatment response.'
+        : 'Canvas heuristics found limited redness. Continue weekly tracking and route the result for dermatologist review.'
+
+  return {
+    confidence,
+    detectedIndicators,
+    lesionCount: markers.length,
+    markers,
+    safetyDisclaimer: SAFETY_DISCLAIMER,
+    severityLevel,
+    severityScore,
+    suggestedNextStep,
+  }
+}
+
+function getMarkerType(cluster, averageIntensity) {
+  if (cluster.count <= 3 && averageIntensity < 58) {
+    return 'comedone'
+  }
+
+  if (averageIntensity > 78 || cluster.strongCount > 9) {
+    return 'inflamed'
+  }
+
+  if (averageIntensity > 56 || cluster.strongCount > 2) {
+    return 'redness'
+  }
+
+  return 'blemish'
+}
+
+function getMarkerSpread(markers) {
+  if (markers.length < 2) {
+    return 0
+  }
+
+  const xs = markers.map((marker) => marker.x)
+  const ys = markers.map((marker) => marker.y)
+
+  return Math.max(...xs) - Math.min(...xs) + (Math.max(...ys) - Math.min(...ys))
+}
+
+function getDetectedIndicators(markers, severityScore, averageIntensity) {
+  return [
+    markers.some((marker) => ['redness', 'inflamed'].includes(marker.type))
+      ? 'redness'
+      : null,
+    markers.some(
+      (marker) =>
+        marker.type === 'inflamed' || (marker.size > 14 && marker.intensity > 68),
+    )
+      ? 'inflamed lesions'
+      : null,
+    markers.some((marker) => marker.type === 'comedone') ? 'comedones' : null,
+    severityScore > 72 && averageIntensity > 76 ? 'scarring risk' : null,
+  ].filter(Boolean)
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value))
+}
+
 function App() {
   const [activeSection, setActiveSection] = useState('check-in')
   const [qualityScore, setQualityScore] = useState(7)
@@ -206,6 +514,8 @@ function App() {
   const [selectedImage, setSelectedImage] = useState(() => demoAcneSamples[0] || null)
   const [analysisResult, setAnalysisResult] = useState(null)
   const [showOverlay, setShowOverlay] = useState(true)
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
 
   useEffect(() => {
     if (selectedImage?.source !== 'upload') {
@@ -292,23 +602,34 @@ function App() {
       src: URL.createObjectURL(file),
     })
     setAnalysisResult(null)
+    setIsAnalyzing(false)
     setSelectedPatientId('patient-upload')
   }
 
   const handleSampleSelect = (sample) => {
     setSelectedImage(sample)
     setAnalysisResult(null)
+    setIsAnalyzing(false)
     setSelectedPatientId('patient-upload')
   }
 
-  const handleRunAnalysis = () => {
+  const handleRunAnalysis = async () => {
     if (!selectedImage) {
       return
     }
 
-    setAnalysisResult(analyzeSkinImage(selectedImage.name || selectedImage.src))
-    setShowOverlay(true)
-    setSelectedPatientId('patient-upload')
+    setIsAnalyzing(true)
+
+    try {
+      const canvasResult = await analyzeImageWithCanvas(selectedImage.src)
+      setAnalysisResult(canvasResult)
+    } catch {
+      setAnalysisResult(analyzeSkinImage(selectedImage.name || selectedImage.src))
+    } finally {
+      setShowOverlay(true)
+      setSelectedPatientId('patient-upload')
+      setIsAnalyzing(false)
+    }
   }
 
   return (
@@ -478,40 +799,47 @@ function App() {
             </div>
 
             <div className="sample-gallery-block">
-              <div className="section-heading compact">
+              <button
+                aria-expanded={isGalleryOpen}
+                className="sample-gallery-header"
+                onClick={() => setIsGalleryOpen((current) => !current)}
+                type="button"
+              >
                 <div>
-                  <p className="eyebrow">Sample gallery</p>
-                  <h2>Images from /demo-acne</h2>
+                  <h2>Sample Gallery</h2>
+                  <span>Images from /demo-acne</span>
                 </div>
-                <Camera size={22} />
-              </div>
-              {demoAcneSamples.length > 0 ? (
-                <div className="sample-gallery">
-                  {demoAcneSamples.map((sample) => (
-                    <button
-                      className={
-                        selectedImage?.id === sample.id
-                          ? 'sample-tile selected'
-                          : 'sample-tile'
-                      }
-                      key={sample.id}
-                      onClick={() => handleSampleSelect(sample)}
-                      type="button"
-                    >
-                      <img src={sample.src} alt={`${sample.name} acne sample`} />
-                      <span>{sample.name}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="gallery-empty">
-                  <AlertTriangle size={20} />
-                  <span>
-                    No sample files were found in public/demo-acne in this
-                    workspace. Upload still works, and gallery samples will
-                    appear here when images are added.
-                  </span>
-                </div>
+                {isGalleryOpen ? <ChevronDown size={22} /> : <ChevronRight size={22} />}
+              </button>
+              {isGalleryOpen && (
+                demoAcneSamples.length > 0 ? (
+                  <div className="sample-gallery">
+                    {demoAcneSamples.map((sample) => (
+                      <button
+                        className={
+                          selectedImage?.id === sample.id
+                            ? 'sample-tile selected'
+                            : 'sample-tile'
+                        }
+                        key={sample.id}
+                        onClick={() => handleSampleSelect(sample)}
+                        type="button"
+                      >
+                        <img src={sample.src} alt={`${sample.name} acne sample`} />
+                        <span>{sample.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="gallery-empty">
+                    <AlertTriangle size={20} />
+                    <span>
+                      No sample files were found in public/demo-acne in this
+                      workspace. Upload still works, and gallery samples will
+                      appear here when images are added.
+                    </span>
+                  </div>
+                )
               )}
             </div>
 
@@ -520,18 +848,18 @@ function App() {
                 <p className="eyebrow">Prototype-only AI</p>
                 <strong>Generate simulated acne analysis</strong>
                 <span>
-                  Deterministic results are based on the image filename or
-                  selected sample path for repeatable demos.
+                  Browser-side canvas heuristics inspect red/pink pixel clusters
+                  for repeatable prototype markers.
                 </span>
               </div>
               <button
                 className="primary-action"
-                disabled={!selectedImage}
+                disabled={!selectedImage || isAnalyzing}
                 onClick={handleRunAnalysis}
                 type="button"
               >
                 <Brain size={18} />
-                Run AI Analysis
+                {isAnalyzing ? 'Analyzing image...' : 'Run AI Analysis'}
               </button>
             </div>
 
@@ -948,7 +1276,7 @@ function AnalysisResults({ result, selectedImage }) {
           <strong>{result.severityScore}/100</strong>
         </div>
         <div className="analysis-score-card">
-          <span>Confidence score</span>
+          <span>Average confidence</span>
           <strong>{result.confidence}%</strong>
         </div>
         <div className="analysis-score-card">
@@ -1023,12 +1351,20 @@ function AnalysisResults({ result, selectedImage }) {
 }
 
 function getMarkerSummary(result) {
+  if (result.markers.length === 0) {
+    return {
+      averageConfidence: result.confidence,
+      mostCommonIndicator: 'none detected',
+      severityExplanation: 'Low-confidence canvas result with no strong red clusters detected.',
+    }
+  }
+
   const averageConfidence = Math.round(
     result.markers.reduce((total, marker) => total + marker.confidence, 0) /
       result.markers.length,
   )
   const markerCounts = result.markers.reduce((counts, marker) => {
-    const label = marker.type === 'lesion' ? 'lesions' : marker.type
+    const label = marker.type === 'blemish' ? 'blemishes' : marker.type
     counts[label] = (counts[label] || 0) + 1
     return counts
   }, {})
