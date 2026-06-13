@@ -657,6 +657,7 @@ function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [assistantMode, setAssistantMode] = useState('patient')
   const [chatInput, setChatInput] = useState('')
+  const [isAssistantBubbleVisible, setIsAssistantBubbleVisible] = useState(true)
   const [chatMessages, setChatMessages] = useState([
     {
       role: 'assistant',
@@ -742,6 +743,10 @@ function App() {
   const handleNavClick = (sectionId) => {
     setActiveSection(sectionId)
     document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const handleOpenAssistant = () => {
+    handleNavClick('assistant')
   }
 
   const handleAction = (patientId, action) => {
@@ -1519,6 +1524,54 @@ function App() {
           </div>
         </section>
       </main>
+
+      <div className="floating-assistant-widget">
+        {isAssistantBubbleVisible && (
+          <div
+            aria-label="Open SkinTrack AI Assistant"
+            className="floating-assistant-bubble"
+            onClick={handleOpenAssistant}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                handleOpenAssistant()
+              }
+            }}
+            role="button"
+            tabIndex={0}
+          >
+            <span className="bubble-text-desktop">Questions about your weekly check-in?</span>
+            <span className="bubble-text-mobile">Ask Assistant</span>
+            <button
+              aria-label="Hide assistant help text"
+              className="bubble-close"
+              onClick={(event) => {
+                event.stopPropagation()
+                setIsAssistantBubbleVisible(false)
+              }}
+              type="button"
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  setIsAssistantBubbleVisible(false)
+                }
+              }}
+            >
+              <XCircle size={16} />
+            </button>
+          </div>
+        )}
+        <button
+          aria-label="Open SkinTrack AI Assistant"
+          className="floating-assistant-button"
+          onClick={handleOpenAssistant}
+          type="button"
+        >
+          <Bot size={28} />
+          <Sparkles size={15} className="floating-sparkle" />
+        </button>
+      </div>
     </div>
   )
 }

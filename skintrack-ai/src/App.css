@@ -111,6 +111,113 @@
   padding: 28px;
 }
 
+.floating-assistant-widget {
+  align-items: center;
+  bottom: 24px;
+  display: flex;
+  gap: 12px;
+  position: fixed;
+  right: 24px;
+  z-index: 30;
+}
+
+.floating-assistant-button,
+.floating-assistant-bubble,
+.bubble-close {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.floating-assistant-button {
+  align-items: center;
+  background:
+    linear-gradient(135deg, #0f766e, #2563eb),
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.6), transparent 3rem);
+  border: 0;
+  border-radius: 999px;
+  box-shadow:
+    0 18px 44px rgba(37, 99, 235, 0.28),
+    0 0 0 8px rgba(45, 212, 191, 0.12);
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  height: 64px;
+  justify-content: center;
+  position: relative;
+  width: 64px;
+  animation: assistantPulse 3.6s ease-in-out infinite;
+}
+
+.floating-sparkle {
+  background: #ecfeff;
+  border-radius: 999px;
+  color: #0f766e;
+  padding: 3px;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+}
+
+.floating-assistant-bubble {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #bae6fd;
+  border-radius: 999px;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.14);
+  color: #0f172a;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 900;
+  gap: 10px;
+  max-width: min(330px, calc(100vw - 120px));
+  padding: 13px 12px 13px 17px;
+  animation: assistantBubbleIn 700ms ease-out both;
+}
+
+.bubble-text-mobile {
+  display: none;
+}
+
+.bubble-close {
+  align-items: center;
+  background: #f1f5f9;
+  border: 0;
+  border-radius: 999px;
+  color: #64748b;
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  padding: 4px;
+}
+
+.floating-assistant-button:focus-visible,
+.floating-assistant-bubble:focus-visible,
+.bubble-close:focus-visible {
+  outline: 3px solid rgba(20, 184, 166, 0.55);
+  outline-offset: 4px;
+}
+
+@keyframes assistantPulse {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.03);
+  }
+}
+
+@keyframes assistantBubbleIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) translateY(0);
+  }
+}
+
 .hero-section,
 .card {
   background: rgba(255, 255, 255, 0.86);
@@ -1727,6 +1834,31 @@ button {
   .workspace,
   .sidebar {
     padding: 18px;
+  }
+
+  .floating-assistant-widget {
+    bottom: 16px;
+    gap: 8px;
+    right: 16px;
+  }
+
+  .floating-assistant-button {
+    height: 56px;
+    width: 56px;
+  }
+
+  .floating-assistant-bubble {
+    font-size: 12px;
+    max-width: calc(100vw - 96px);
+    padding: 10px 9px 10px 12px;
+  }
+
+  .bubble-text-desktop {
+    display: none;
+  }
+
+  .bubble-text-mobile {
+    display: inline;
   }
 
   .nav-list,
